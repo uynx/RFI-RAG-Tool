@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import axios from 'axios';
 import './Chat.css';
 
@@ -8,6 +8,23 @@ export default function Chat() {
   const [isUploading, setIsUploading] = useState(false);
   const [stage, setStage] = useState('upload'); // 'upload' or 'chat'
   const fileInputRef = useRef(null);
+  const chatContainerRef = useRef(null);
+
+  // Function to scroll to bottom
+  const scrollToBottom = () => {
+    if (chatContainerRef.current) {
+      const scrollOptions = {
+        top: chatContainerRef.current.scrollHeight,
+        behavior: 'smooth'
+      };
+      chatContainerRef.current.scrollTo(scrollOptions);
+    }
+  };
+
+  // Scroll to bottom whenever messages change
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages]);
 
   const handleInputChange = (e) => {
     setInput(e.target.value);
@@ -107,7 +124,7 @@ export default function Chat() {
   return (
     <div className="chat-stage">
       <div id="title">RFI Summarizer</div>
-      <div id="chat-container">
+      <div id="chat-container" ref={chatContainerRef}>
         {messages.map((msg, index) => (
           <div
             key={index}
