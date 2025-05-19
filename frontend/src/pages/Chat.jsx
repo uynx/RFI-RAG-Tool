@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import axios from 'axios';
+import ReactMarkdown from 'react-markdown';
 import './Chat.css';
 
 export default function Chat() {
@@ -57,7 +58,7 @@ export default function Chat() {
       setMessages([
         {
           role: 'assistant',
-          content: `I've analyzed your RFI document. Here's a summary:\n\n${response.data.summary}\n\nYou can now ask me any questions about the document.`
+          content: `I've analyzed your RFI document. Here is the outline for what a good submission should contain:\n\n${response.data.summary}\n\nYou can now ask me any questions about the document.`
         }
       ]);
     } catch (error) {
@@ -99,10 +100,10 @@ export default function Chat() {
   if (stage === 'upload') {
     return (
       <div className="upload-stage">
-        <div id="title">RFI Summarizer</div>
+        <div id="title">RFI Assistant</div>
         <div className="upload-content">
           <h2>Upload your RFI Document</h2>
-          <p>Upload a PDF file to get started with the RFI analysis</p>
+          <p>Upload the PDF file to get started with the RFI analysis</p>
           <div className="upload-area">
             <input
               type="file"
@@ -123,14 +124,14 @@ export default function Chat() {
 
   return (
     <div className="chat-stage">
-      <div id="title">RFI Summarizer</div>
+      <div id="title">RFI Assistant</div>
       <div id="chat-container" ref={chatContainerRef}>
         {messages.map((msg, index) => (
           <div
             key={index}
             className={`message ${msg.role === 'user' ? 'user' : 'assistant'}`}
           >
-            {msg.content}
+            <ReactMarkdown>{msg.content}</ReactMarkdown>
           </div>
         ))}
       </div>

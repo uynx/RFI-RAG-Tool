@@ -151,6 +151,89 @@
   white-space: pre-wrap;
 }
 
+/* Markdown styles */
+.message h1, .message h2, .message h3, .message h4, .message h5, .message h6 {
+  margin: 16px 0 8px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.message h1 { font-size: 1.5em; }
+.message h2 { font-size: 1.3em; }
+.message h3 { font-size: 1.2em; }
+.message h4 { font-size: 1.1em; }
+.message h5, .message h6 { font-size: 1em; }
+
+.message p {
+  margin: 8px 0;
+}
+
+.message ul, .message ol {
+  margin: 8px 0;
+  padding-left: 24px;
+}
+
+.message li {
+  margin: 4px 0;
+}
+
+.message strong {
+  font-weight: 600;
+}
+
+.message em {
+  font-style: italic;
+}
+
+.message code {
+  background-color: rgba(0, 0, 0, 0.05);
+  padding: 2px 4px;
+  border-radius: 4px;
+  font-family: 'SF Mono', 'Menlo', 'Monaco', 'Courier New', monospace;
+  font-size: 0.9em;
+}
+
+.message pre {
+  background-color: rgba(0, 0, 0, 0.05);
+  padding: 12px;
+  border-radius: 8px;
+  overflow-x: auto;
+  margin: 8px 0;
+  font-family: 'SF Mono', 'Menlo', 'Monaco', 'Courier New', monospace;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.message.user pre, .message.user code {
+  background-color: rgba(255, 255, 255, 0.1);
+}
+
+.message blockquote {
+  margin: 8px 0;
+  padding-left: 16px;
+  border-left: 4px solid rgba(0, 0, 0, 0.1);
+  color: #666;
+}
+
+.message.user blockquote {
+  border-left-color: rgba(255, 255, 255, 0.2);
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.message a {
+  color: #007AFF;
+  text-decoration: none;
+}
+
+.message.user a {
+  color: #fff;
+  text-decoration: underline;
+}
+
+.message a:hover {
+  text-decoration: underline;
+}
+
 .message.user {
   background-color: #007AFF;
   color: white;

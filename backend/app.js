@@ -24,7 +24,7 @@ const PORT = process.env.PORT || 3000;
 // Set up multer for PDF uploads
 const upload = multer({ dest: 'uploads/' });
 
-// --- Upload and summarize RFI PDF ---
+// Upload and summarize the RFI
 app.post('/api/upload', upload.single('file'), async (req, res) => {
   try {
     const pdfPath = req.file.path;
@@ -34,17 +34,44 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
     const pdfData = await pdfParse(dataBuffer);
     const text = pdfData.text;
 
-    // Call Mistral to summarize the text with markdown formatting
+
     const chatResponse = await client.chat.complete({
-      model: 'mistral-small-latest',
+      model: 'mistral-small-latest', 
+      temperature: 0.1, // Lower temperature for more deterministic, factual extraction
       messages: [
         {
           role: 'system',
-          content: 'You are an assistant designed to analyze Requests for Information (RFIs) for the Massachusetts Department of Transportation (MassDOT). Your task is to review the provided RFI document and extract the key criteria that define a high-quality submission. Focus solely on identifying and listing the specific elements, requirements, and considerations that a submission must address to meet the RFI’s objectives effectively. Do not provide a summary or additional commentary. Output the criteria in a clear, concise list, ensuring all relevant aspects from the RFI are captured for use in evaluating future submissions.'
+          content: `You are an expert assistant specializing in analyzing Requests for Information (RFIs). Your task is to meticulously review the provided RFI document and extract the specific requirements that a submission must address. The goal is to create a definitive list of what the RFI is asking for, which will be used to evaluate future submissions.
+Focus on transforming the RFI's questions, requested information, and areas of interest into a clear, itemized list of requirements.
+Output ONLY a bulleted list of these requirements. Each bullet point should be a succinct but detailed description of what a submission should provide or address based on the RFI. Do not include any introductory phrases, summaries, or explanations beyond the list itself.`
         },
         {
           role: 'user',
-          content: `Analyze the provided RFI document and output a list of criteria that a high-quality submission must address to meet the RFI’s requirements. Include only the specific elements, requirements, and considerations outlined in the RFI that are essential for a complete and compliant response. The criteria will be used to evaluate and score future submissions for MassDOT. Provide a very concise response that just listsi the requirements. Do not include extra information.\n\n${text}`
+          content: `Here is an example of how to extract requirements:
+
+EXAMPLE INPUT RFI TEXT:
+---
+The Department seeks information on innovative approaches to improve pedestrian safety at unsignalized crosswalks. Specifically, we are interested in:
+1. What new technologies or engineering treatments have proven effective in increasing driver yielding rates? Please describe their mechanisms and effectiveness.
+2. How can data analytics be leveraged to identify high-risk locations before crashes occur? Include details on data sources and analytical methods.
+3. Provide case studies of successful implementations in urban environments, detailing project scope, outcomes, and lessons learned.
+We also request input on potential challenges in deploying such solutions and strategies to overcome them.
+---
+EXAMPLE OUTPUT REQUIREMENTS LIST:
+---
+- Description of new technologies or engineering treatments proven effective in increasing driver yielding rates at unsignalized crosswalks, including their mechanisms and effectiveness.
+- Explanation of how data analytics can be leveraged to identify high-risk pedestrian locations before crashes occur, including details on data sources and analytical methods.
+- Case studies of successful implementations of pedestrian safety approaches in urban environments, detailing project scope, outcomes, and lessons learned.
+- Input on potential challenges in deploying pedestrian safety solutions and strategies to overcome them.
+---
+
+Now, analyze the following RFI document and extract the requirements as a bulleted list, following the format of the example output.
+
+RFI DOCUMENT TEXT:
+---
+${text}
+---
+`
         }
       ]
     });
@@ -61,7 +88,7 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
   }
 });
 
-// --- Chat with Mistral ---
+// Chat with LLM
 app.post('/api/chat', async (req, res) => {
   try {
     const { message } = req.body;
