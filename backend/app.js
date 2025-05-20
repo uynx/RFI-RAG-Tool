@@ -17,6 +17,7 @@ const { body, validationResult } = require('express-validator');
 const { SystemMessage, HumanMessage } = require('@langchain/core/messages');
 const axios = require('axios');
 const axiosRetry = require('axios-retry').default;
+const { RecursiveCharacterTextSplitter } = require('langchain/text_splitter');
 
 dotenv.config();
 
@@ -97,24 +98,26 @@ function formatRequirementsForLLM(requirementsMap) {
 
 // Router chain to determine query type
 const queryRouterPrompt = PromptTemplate.fromTemplate(`
-You are an expert at analyzing user queries about RFI documents. Your task is to determine if the user's query is about:
-1. Editing the requirements list (adding, removing, or modifying requirements)
-2. Asking general questions about the RFI document
-
-Examples of requirement edits:
-- "Add a requirement about cost analysis"
-- "Remove the case studies requirement"
-- "Update the risk analytics requirement to include more detail"
-
-Examples of general questions:
-- "What is the main goal of this RFI?"
-- "Can you explain more about the deployment challenges?"
-- "What technologies are they interested in?"
-
-User query: {query}
-
-Respond with ONLY one word: either "EDIT" or "QUESTION"
-`);
+  Analyze the user's RFI query. Categorize as 'EDIT' (modifying requirements) or 'QUESTION' (general RFI inquiry).
+  
+  **EDIT examples:**
+  - "Add: Must support SSO."
+  - "Remove: Advanced Reporting."
+  - "Change Data Security: Compliant with ISO 27001, GDPR."
+  - "Include scalability section?"
+  - "Omit legacy integration."
+  
+  **QUESTION examples:**
+  - "RFI submission deadline?"
+  - "Elaborate on Technical Architecture?"
+  - "Main RFI contact?"
+  - "Submission evaluation criteria?"
+  - "Project background info?"
+  
+  User query: {query}
+  
+  Response (EDIT or QUESTION only):
+  `);
 
 const queryRouter = RunnableSequence.from([
   queryRouterPrompt,
@@ -140,12 +143,28 @@ app.post('/api/upload', upload.single('file'), async (req, res, next) => {
     const text = pdfData.text;
     currentPDFText = text;
 
+    // Create text splitter for chunking
+    const textSplitter = new RecursiveCharacterTextSplitter({
+      chunkSize: 1000, // Size of each chunk in characters
+      chunkOverlap: 200, // Overlap between chunks
+      separators: ["\n\n", "\n", ".", "!", "?", ",", " ", ""], // Split on these characters in order
+    });
+
+    // Split the document into chunks
+    const chunks = await textSplitter.createDocuments([text]);
+
     // Create a new vector store instance for the new document
     vectorStore = new MemoryVectorStore(embeddings);
-    await vectorStore.addDocuments([{
-      pageContent: text,
-      metadata: { source: 'uploaded_rfi' }
-    }]);
+    
+    // Add chunks to vector store with metadata
+    await vectorStore.addDocuments(chunks.map((chunk, index) => ({
+      pageContent: chunk.pageContent,
+      metadata: { 
+        source: 'uploaded_rfi',
+        chunk: index + 1,
+        totalChunks: chunks.length
+      }
+    })));
 
     // Extract requirements using the existing prompt
     const chatResponse = await client.chat.complete({
@@ -154,9 +173,17 @@ app.post('/api/upload', upload.single('file'), async (req, res, next) => {
       messages: [
         {
           role: 'system',
-          content: `You are an expert assistant specializing in analyzing Requests for Information (RFIs). Your task is to meticulously review the provided RFI document and extract the specific requirements that a submission must address. The goal is to create a definitive list of what the RFI is asking for, which will be used to evaluate future submissions.
-    Focus on transforming the RFI's questions, requested information, and areas of interest into a clear, itemized list of requirements. For each requirement, include a succinct heading (1-3 words) that summarizes what the requirement details.
-    Output ONLY a bulleted list of these requirements. Each bullet point should start with a heading in bold (using markdown **text**) followed by a colon and a succinct but detailed description of what a submission should provide or address based on the RFI. Do not include any introductory phrases, summaries, or explanations beyond the list itself.`
+          content: `Extract specific RFI requirements. Create a succinct heading (1-3 words) for each.
+Output ONLY a bulleted list. Format: - **[Heading]**: [Detailed description].
+No intro/summary.
+
+**Example Output:**
+- **Integration**: Describe CRM/ERP integration (APIs/methods).
+- **Security**: Outline data protection measures/protocols.
+- **Scalability**: Detail ability to scale for 50% user/data growth in 2 yrs.
+- **Reporting**: Explain standard/custom report capabilities.
+- **Support**: Describe support plans (response times/channels).
+`
         },
         {
           role: 'user',
@@ -164,7 +191,6 @@ app.post('/api/upload', upload.single('file'), async (req, res, next) => {
         }
       ]
     });
-
     const summary = chatResponse.choices[0].message.content;
 
     // Extract and store requirements
@@ -187,7 +213,8 @@ app.post('/api/upload', upload.single('file'), async (req, res, next) => {
 
     res.json({ 
       summary, 
-      requirements: formatRequirementsForDisplay(currentRequirements)
+      requirements: formatRequirementsForDisplay(currentRequirements),
+      chunks: chunks.length // Add chunk count to response
     });
     
   } catch (error) {
@@ -217,30 +244,52 @@ app.post('/api/chat', validateChatInput, async (req, res, next) => {
         const formattedRequirements = formatRequirementsForLLM(currentRequirements);
         
         const editResponse = await chatModel.invoke([
-          new SystemMessage(`You are an expert assistant specializing in editing RFI requirements. Your task is to modify the provided list of requirements based on the user's instruction.
+          new SystemMessage(`Your primary task is to edit RFI requirements based on the user's instruction.
+            **Crucially, you MUST first output the ENTIRE, complete, updated list of ALL requirements after applying the changes.**
+            
+            Maintain format for all requirements: - **Heading**: Description.
+            
+            **Response Structure (Strictly Follow):**
+            
+            **Part 1: Full Updated Requirements List**
+            *   Output the **ENTIRE updated list of all requirements** here. Every single requirement, new and existing (if not removed), must be listed in bullet points.
+            
+            **(Leave a single blank line here)**
+            
+            **Part 2: Summary of Changes**
+            *   After the blank line, provide a brief summary of what changed. Use one of the following headers:
+                *   Changes Made - Added: (followed by only the newly added items)
+                *   Changes Made - Removed: (followed by only the removed items)
+                *   Changes Made - Edited: (followed by only the items that were modified)
+                *   Changes Made - Multiple: (if different types of changes occurred, list affected items under sub-headers like "Added:" and "Removed:")
+            
+            **Rules:**
+            1.  **Full List is Paramount:** The complete updated list in Part 1 is the most important part of your response.
+            2.  **Maintain Format:** Use - **Heading**: Description for all requirements in both Part 1 and Part 2.
+            3.  **Clarity:** Ensure requirements remain clear.
+            4.  **No Extra Text:** Only output what is specified in the structure.
+            
+            **Example:**
+            Current:
+            - **Data Storage**: How data is stored.
+            - **UI**: Provide mockups.
+            User: "Remove UI. Add reporting."
+            
+            Here is an example of what your outputs should always look like (Always reprint every requirement and then print the changes made): 
 
-The requirements are provided in a specific format where each requirement has a heading (in bold) and a description. You must maintain this exact format in your response.
-
-IMPORTANT: Your response must follow this exact structure:
-
-1. First, output the complete updated list of all requirements in bullet point format
-2. Then, on a new line, output one of these headers followed by the affected requirements:
-   - "Added Requirements:" (if new requirements were added)
-   - "Removed Requirements:" (if requirements were removed)
-   - "Edited Requirements:" (if existing requirements were modified)
-
-Rules:
-1. Keep the same markdown format with bullet points and bold headings
-2. Only modify what's necessary based on the instruction
-3. If adding new requirements, add them to the end of the list
-4. If removing requirements, exclude them from the main list
-5. If editing requirements, update them in their original position
-6. Do not add any explanations or additional text beyond the required structure
-7. Maintain the clarity and specificity of each requirement
-
-Current requirements:
-${formattedRequirements}`),
-          new HumanMessage(message)
+            Expected Output:
+            - **Data Storage**: How data is stored.
+            - **Reporting**: Detail reporting features.
+            
+            Changes Made - Multiple:
+            Added:
+            - **Reporting**: Detail reporting features.
+            Removed:
+            - **UI**: Provide mockups.
+            
+            **Current requirements:**
+            ${formattedRequirements}`),
+            new HumanMessage(message)
         ]);
 
         const response = editResponse.content;
@@ -284,20 +333,22 @@ ${formattedRequirements}`),
           }
         });
       } else {
-        // Handle general RFI questions using RAG
-        const relevantDocs = await vectorStore.similaritySearch(message, 3);
-        const context = relevantDocs.map(doc => doc.pageContent).join('\n\n');
+        // Handle general RFI questions using RAG with chunked context
+        const relevantDocs = await vectorStore.similaritySearch(message, 5); // Increased from 3 to 5 for better context
+        const context = relevantDocs
+          .map(doc => `[Chunk ${doc.metadata.chunk}/${doc.metadata.totalChunks}]\n${doc.pageContent}`)
+          .join('\n\n');
 
-        const questionResponse = await chatModel.invoke([
-          new SystemMessage(`You are an expert assistant helping users understand RFI documents. Use the following context from the RFI document to answer the user's question. If the answer cannot be found in the context, say so.
-
-Context from RFI:
-${context}
-
-Current requirements (for reference):
-${formatRequirementsForLLM(currentRequirements)}`),
-          new HumanMessage(message)
-        ]);
+          const questionResponse = await chatModel.invoke([
+            new SystemMessage(`Answer user's RFI question using provided context. If answer not in context, state so.
+  Context (chunked):
+  ${context}
+  
+  Requirements (reference):
+  ${formatRequirementsForLLM(currentRequirements)}
+  Chunks marked [Chunk X/Y].`),
+            new HumanMessage(message)
+          ]);
 
         res.json({
           type: 'question',
@@ -320,8 +371,6 @@ ${formatRequirementsForLLM(currentRequirements)}`),
     
     // Handle different types of errors
     if (error.response) {
-      // The request was made and the server responded with a status code
-      // that falls out of the range of 2xx
       res.status(error.response.status).json({
         error: 'AI Service Error',
         message: error.response.data.message || 'An error occurred while processing your request.'
@@ -333,7 +382,6 @@ ${formatRequirementsForLLM(currentRequirements)}`),
         message: 'Unable to reach the AI service. Please try again later.'
       });
     } else {
-      // Something happened in setting up the request that triggered an Error
       res.status(500).json({
         error: 'Internal Server Error',
         message: 'An unexpected error occurred. Please try again later.'
@@ -359,5 +407,5 @@ app.use((err, req, res, next) => {
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+  console.log(`Running!`);
 });
