@@ -174,26 +174,34 @@ app.post('/api/upload', upload.single('file'), async (req, res, next) => {
 
     // Extract requirements using the existing prompt
     const chatResponse = await client.chat.complete({
-      model: 'mistral-small-latest',
+      model: 'mistral-small-latest', // Or your preferred model
       temperature: 0.1,
       messages: [
         {
           role: 'system',
-          content: `Extract specific RFI requirements. Create a succinct heading (1-3 words) for each.
-Output ONLY a bulleted list. Format: - **[Heading]**: [Detailed description].
+          content: `You are an expert RFI evaluator. Your primary goal is to dissect the provided RFI text into its distinct informational requests or thematic areas of inquiry.
+For each distinct RFI request or theme you identify:
+1.  Internally understand what the RFI is asking respondents to provide or address.
+2.  From that understanding, formulate an evaluation metric that describes the key elements, qualities, and characteristics of an ideal, comprehensive, and high-quality ("perfect") submission for that specific part of the RFI. This evaluation metric should reflect what a perfect submission would implement, include, demonstrate, or provide (e.g., specificity, examples, data, justifications, actionable recommendations, depth of analysis).
+
+Create a succinct heading (2-4 words) for each evaluation metric.
+The description for each metric should clearly define what aspect of a submission will be assessed and what constitutes excellence for that aspect.
+Output ONLY a bulleted list of these evaluation metrics. Format: - **[Heading]**: [Description of the evaluation metric and the qualities of an excellent response].
 No intro/summary.
 
-**Example Output:**
-- **Integration**: Describe CRM/ERP integration (APIs/methods).
-- **Security**: Outline data protection measures/protocols.
-- **Scalability**: Detail ability to scale for 50% user/data growth in 2 yrs.
-- **Reporting**: Explain standard/custom report capabilities.
-- **Support**: Describe support plans (response times/channels).
+**Example Output (Illustrating the desired format for succinct evaluation metrics):**
+
+- **Procedural Clarity**: Detail and clarity of described existing operational procedures, including examples, relevant metrics, and acknowledgment of limitations.
+- **Solution Viability**: Innovativeness, feasibility, thoroughness of technical explanation, and justification of the proposed technical solution, including risk assessment and mitigation.
+- **Relevant Expertise**: Depth, direct relevance, and substantiation (with specific examples) of the team's experience and qualifications tailored to the RFI's scope.
+- **Constructive Input**: Specificity, actionability, and clear rationale of the feedback provided on draft specifications or requested documents.
+- **Plan Realism**: Clarity, completeness, logical phasing, and perceived realism of the proposed implementation plan and project timeline, including resource considerations.
+- **Estimate Justification**: Transparency, detailed breakdown, and clear justification of cost projections and resource requirements based on the scope of work.
 `
         },
         {
           role: 'user',
-          content: text
+          content: text // This 'text' variable will contain the full RFI document
         }
       ]
     });
@@ -397,7 +405,6 @@ app.post('/api/chat', validateChatInput, async (req, res, next) => {
     }
   } catch (error) {
     console.error('Error processing chat:', error);
-    
     // Handle different types of errors
     if (error.response) {
       res.status(error.response.status).json({
