@@ -84,6 +84,12 @@ let currentPDFText = '';
 
 // Helper functions
 function formatRequirementsForDisplay(requirementsMap) {
+  // console.log('Current requirements in display format:', 
+  //   Array.from(requirementsMap.entries()).map(([heading, description]) => ({
+  //     heading,
+  //     description
+  //   }))
+  // );
   return Array.from(requirementsMap.entries()).map(([heading, description]) => ({
     heading,
     description
@@ -240,6 +246,7 @@ app.post('/api/chat', validateChatInput, async (req, res, next) => {
       const queryType = await queryRouter.invoke({ query: message });
       
       if (queryType.trim() === 'EDIT') {
+        
         // Handle requirements editing
         const formattedRequirements = formatRequirementsForLLM(currentRequirements);
         
@@ -293,6 +300,8 @@ app.post('/api/chat', validateChatInput, async (req, res, next) => {
         ]);
 
         const response = editResponse.content;
+
+        
         const [mainList, operationSummary] = response.split('\n\n');
         
         // Parse and update requirements
@@ -307,6 +316,26 @@ app.post('/api/chat', validateChatInput, async (req, res, next) => {
             const description = descParts.join(':').trim();
             modifiedRequirements.set(cleanHeading, description);
           });
+
+        // console.log('\nCurrent requirements before edit:', 
+        //   Array.from(currentRequirements.entries()).map(([k, v]) => `${k}: ${v}`)
+        // );
+
+        // console.log('\nModified requirements after edit:', 
+        //   Array.from(modifiedRequirements.entries()).map(([k, v]) => `${k}: ${v}`)
+        // );
+
+        // Debug: Compare old and new requirements
+        // const added = [...modifiedRequirements.keys()].filter(k => !currentRequirements.has(k));
+        // const removed = [...currentRequirements.keys()].filter(k => !modifiedRequirements.has(k));
+        // const changed = [...modifiedRequirements.keys()].filter(k => 
+        //   currentRequirements.has(k) && currentRequirements.get(k) !== modifiedRequirements.get(k)
+        // );
+
+        // console.log('\nChanges detected:');
+        // console.log('Added requirements:', added);
+        // console.log('Removed requirements:', removed);
+        // console.log('Modified requirements:', changed);
 
         currentRequirements = modifiedRequirements;
 
