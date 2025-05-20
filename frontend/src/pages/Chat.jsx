@@ -3,6 +3,8 @@ import axios from 'axios';
 import ReactMarkdown from 'react-markdown';
 import './Chat.css';
 
+
+
 export default function Chat() {
   const [input, setInput] = useState('');
   const [messages, setMessages] = useState([]);
@@ -10,6 +12,8 @@ export default function Chat() {
   const [stage, setStage] = useState('upload'); // 'upload' or 'chat'
   const fileInputRef = useRef(null);
   const chatContainerRef = useRef(null);
+  const [showBaselineModal, setShowBaselineModal] = useState(false);
+  const [baselineQuestions, setBaselineQuestions] = useState('');
 
   // Function to scroll to bottom
   const scrollToBottom = () => {
@@ -146,7 +150,31 @@ export default function Chat() {
         />
         <button type="submit" id="enter">
         </button>
+        <button
+          type="button"
+          id="baseline-button"
+          onClick={() => setShowBaselineModal(true)}
+        >
+          Baseline Questions
+        </button>
       </form>
+
+      {/* Baseline Questions Modal */}
+      {showBaselineModal && (
+        <div className="modal-overlay">
+          <div className="modal">
+            <div className="modal-header">
+              <h3>Baseline Questions</h3>
+              <button className="close-btn" onClick={() => setShowBaselineModal(false)}>×</button>
+            </div>
+            <textarea
+              value={baselineQuestions}
+              onChange={(e) => setBaselineQuestions(e.target.value)}
+              placeholder="Enter your baseline questions here..."
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 }
