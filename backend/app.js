@@ -4,6 +4,10 @@ const dotenv = require('dotenv');
 const cors = require('cors');
 const multer = require('multer');
 const fs = require('fs');
+const pdfParse = require('pdf-parse');
+const path = require('path');
+const BASELINE_PATH = path.join(__dirname, 'baseline.json');
+=======
 const { PDFLoader } = require("langchain/document_loaders/fs/pdf");
 const { RecursiveCharacterTextSplitter } = require('langchain/text_splitter');
 const { ChatMistralAI } = require('@langchain/mistralai');
@@ -18,7 +22,6 @@ const { body, validationResult } = require('express-validator');
 const { SystemMessage, HumanMessage } = require('@langchain/core/messages');
 const axios = require('axios');
 const axiosRetry = require('axios-retry').default;
-
 dotenv.config();
 
 if (!process.env.MISTRAL_API_KEY) {
@@ -572,6 +575,35 @@ app.get('/api/requirements', (req, res) => {
   });
 });
 
+
+// Get baseline questions
+app.get('/api/baseline', (req, res) => {
+  try {
+    const data = fs.readFileSync(BASELINE_PATH, 'utf-8');
+    const json = JSON.parse(data);
+    res.json({ questions: json.questions || '' });
+  } catch (error) {
+    console.error('Error reading baseline questions:', error.message);
+    res.status(500).json({ error: 'Failed to load baseline questions' });
+  }
+});
+
+// Save/update baseline questions
+app.post('/api/baseline', (req, res) => {
+  const { questions } = req.body;
+  if (typeof questions !== 'string') {
+    return res.status(400).json({ error: 'Invalid questions format' });
+  }
+
+  try {
+    fs.writeFileSync(BASELINE_PATH, JSON.stringify({ questions }, null, 2));
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Error saving baseline questions:', error.message);
+    res.status(500).json({ error: 'Failed to save baseline questions' });
+  }
+});
+=======
 // Error handling middleware
 app.use((err, req, res, next) => {
   console.error(err.stack);
