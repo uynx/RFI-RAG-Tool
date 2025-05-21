@@ -7,7 +7,6 @@ const fs = require('fs');
 const pdfParse = require('pdf-parse');
 const path = require('path');
 const BASELINE_PATH = path.join(__dirname, 'baseline.json');
-=======
 const { PDFLoader } = require("langchain/document_loaders/fs/pdf");
 const { RecursiveCharacterTextSplitter } = require('langchain/text_splitter');
 const { ChatMistralAI } = require('@langchain/mistralai');
@@ -24,12 +23,26 @@ const axios = require('axios');
 const axiosRetry = require('axios-retry').default;
 dotenv.config();
 
+const app = express();
+
+// Initialize middleware
+app.use(helmet()); // Add security headers
+app.use(cors());
+app.use(express.json());
+
 if (!process.env.MISTRAL_API_KEY) {
   console.error('MISTRAL_API_KEY is not set in environment variables');
   process.exit(1);
 }
 
 // Initialize LangChain components
+const client = new Mistral({ apiKey: process.env.MISTRAL_API_KEY });
+const chatModel = new ChatMistralAI({
+  apiKey: process.env.MISTRAL_API_KEY,
+  modelName: 'mistral-small-latest',
+  temperature: 0.1,
+});
+
 const embeddings = new MistralAIEmbeddings({
   apiKey: process.env.MISTRAL_API_KEY,
   modelName: 'mistral-embed',
@@ -37,13 +50,6 @@ const embeddings = new MistralAIEmbeddings({
 
 // Initialize in-memory vector store
 let vectorStore = new MemoryVectorStore(embeddings);
-
-const client = new Mistral({ apiKey: process.env.MISTRAL_API_KEY });
-const chatModel = new ChatMistralAI({
-  apiKey: process.env.MISTRAL_API_KEY,
-  modelName: 'mistral-small-latest',
-  temperature: 0.1,
-});
 
 // Configure axios retry for rate limits
 axiosRetry(axios, { 
@@ -57,15 +63,8 @@ axiosRetry(axios, {
   }
 });
 
-const app = express();
-
 // Configure multer for file uploads
 const upload = multer({ dest: 'uploads/' });
-
-// Initialize middleware
-app.use(helmet()); // Add security headers
-app.use(cors());
-app.use(express.json());
 
 // Rate limiting
 const limiter = rateLimit({
@@ -81,66 +80,8 @@ const validateChatInput = [
     .isLength({ max: 1000 }).withMessage('Message must be less than 1000 characters'),
 ];
 
-// Store for RFI requirements
-let currentRequirements = new Map();
-let currentPDFText = '';
-
-// Define the RFI cleaning system prompt
-const RFI_CLEANING_SYSTEM_PROMPT = `Expert RFI Processor: Your goal is to distill RFI text by **selectively REMOVING** non-essential information, optimizing it for a **vector database**. Essential text for submission **MUST BE RETAINED VERBATIM**. No rephrasing, summarization, or alteration of this essential text is allowed; accuracy and relevance are paramount for semantic search.
-
-Core Principles:
-*   **Verbatim Retention (Vector DB):** Crucial RFI text (requirements, direct context, solicited info) **MUST BE PRESERVED EXACTLY** as in the original, with no wording changes. This ensures accurate core content embedding.
-*   **Remove Non-Essentials (Vector DB Clarity):** Identify and completely remove text not part of core RFI requests or their immediate, necessary context. This reduces noise and improves vector search relevance.
-
-General Cleaning & Structuring (applied to VERBATIM retained text):
-1.  Remove headers, footers, page numbers.
-2.  Reassemble broken paragraphs/sentences to original flow (words unchanged).
-3.  Eliminate redundant whitespace/line breaks.
-4.  Remove OCR artifacts/noise.
-5.  Preserve original bold/italic formatting *only* for key terms in retained essential requirements/context.
-6.  Convert tables with requirements/essential data to clean text; content/wording **must be verbatim**. Remove procedural tables.
-7.  **No Corrections:** Do not correct original spelling/grammar/typos in retained text. Preserve source integrity for vector DB.
-
-Content Distillation (RETAIN VERBATIM vs. REMOVE):
-
-8.  **RETAIN VERBATIM (for accurate embedding):**
-    a.  **Core RFI Requests:** Explicit questions, "Information Solicited" sections, lists of desired capabilities, features, or info to be provided. Keep exactly as written.
-    b.  **Essential Background/Context:** Summaries, problem statements, background *directly and unequivocally necessary* to understand RFI scope, objectives, needs. Retain verbatim. Remove general, administrative, or implied context to avoid diluting semantic meaning in vector DB.
-    c.  **Technical Specifications & Criteria:** Technical details, performance metrics, evaluation criteria (if for judging responses), specific standards. Retain verbatim.
-    d.  **Response Structure Guidelines:** Instructions on *content* organization (e.g., "Your proposal should include..."). Retain verbatim.
-
-9.  **REMOVE COMPLETELY (to reduce vector DB noise):**
-    a.  **Procedural & Logistical Info:**
-        i.  Contact details for RFI process/submission system support.
-        ii. Submission mechanics (how/where to submit, e.g., portal names, addresses, file format rules not tied to content).
-        iii. General informational URLs/hyperlinks. *Retain URL verbatim ONLY if part of a direct instruction (e.g., "Analyze framework at [URL]"). Remove all others.*
-        iv. RFI Document Metadata: Internal doc numbers, RFI publication dates (unless in retained requirements schedule), docket/FR citation/FR Doc numbers, BILLING CODES.
-        v.  Purely administrative dates (e.g., "Comments due March 20"). *Retain dates verbatim if part of a project milestone/deliverable schedule the RFI asks about.*
-    b.  **Non-Essential & Boilerplate Content:**
-        i.  Legal disclaimers/boilerplate about the RFI document itself (e.g., "prototype site," "not official legal edition," "LEGAL STATUS").
-        ii. Acknowledgements, author/editor lists, forewords.
-        iii. **Remove All Footnotes/Endnotes:** Entirely remove footnotes, endnotes, and their markers. Do not integrate their content.
-        iv. General intros, preambles, conclusions not contributing to understanding solicited information (per Rule 8).
-        v.  Attendee lists, RFI revision histories, similar administrative overhead.
-        vi. Tables of Contents.
-
-10. **Output Formatting:**
-    a.  Output only the distilled text (verbatim retained sections, non-essentials removed).
-    b.  Use double newlines for clear section breaks.
-    c.  Preserve original list structures for requirements/solicited info.
-
-11. **Guiding Principle for Removal (Optimizing for Vector Database):** The output must be a streamlined RFI for vector database ingestion, where semantic relevance is key. It must consist *only* of the verbatim essential text. Completely remove all other administrative, procedural, or informational details not critical for response formulation or understanding core requirements to prevent noisy/irrelevant vectors. If in doubt about removal, lean towards removing text if it doesn't state what respondent must *provide* or its *direct, necessary context*, as this improves vector DB retrieval quality.
-
-Do not add any commentary or explanations. Only output the cleaned text.`;
-
 // Helper functions
 function formatRequirementsForDisplay(requirementsMap) {
-  // console.log('Current requirements in display format:', 
-  //   Array.from(requirementsMap.entries()).map(([heading, description]) => ({
-  //     heading,
-  //     description
-  //   }))
-  // );
   return Array.from(requirementsMap.entries()).map(([heading, description]) => ({
     heading,
     description
@@ -182,6 +123,9 @@ const queryRouter = RunnableSequence.from([
   new StringOutputParser(),
 ]);
 
+// Store for RFI requirements
+let currentRequirements = new Map();
+
 // Upload and process the RFI
 app.post('/api/upload', upload.single('file'), async (req, res, next) => {
   try {
@@ -205,7 +149,7 @@ app.post('/api/upload', upload.single('file'), async (req, res, next) => {
       pageNumber: doc.metadata?.loc?.pageNumber || (index + 1)
     }));
 
-    const rawFullText = pageContents.map(page => page.content).join('\n\n');
+    const rawFullText = pageContents.map(page => page.content+page.pageNumber).join('\n\n');
     currentPDFText = rawFullText;
 
     // ---- STAGE 1: Extract initial requirements from raw text ----
@@ -256,29 +200,7 @@ No intro/summary.
       });
     currentRequirements = newRequirements;
 
-    // ---- STAGE 2: Comment out cleaning stage ----
-    /*
-    console.log('\nAttempting to clean RFI text for vector database...');
-    const cleaningResponse = await client.chat.complete({
-      model: 'mistral-small-latest',
-      temperature: 0.0,
-      messages: [
-        {
-          role: 'system',
-          content: RFI_CLEANING_SYSTEM_PROMPT
-        },
-        {
-          role: 'user',
-          content: rawFullText
-        }
-      ]
-    });
-    const cleanedTextForVectorDB = cleaningResponse.choices[0].message.content;
-    */
-
-    // ---- STAGE 3: Chunk the raw text and add to vector store ----
-    console.log('\nChunking raw text for vector database...');
-    
+    // ---- STAGE 2: Chunk the raw text and add to vector store ----    
     const textSplitter = new RecursiveCharacterTextSplitter({
       separators: [
         "\n\n", ". ", "\n", // Prioritize semantic breaks
@@ -305,11 +227,9 @@ No intro/summary.
 
     // Split the raw text into chunks
     const chunks = await textSplitter.createDocuments([rawFullText]);
-    console.log(`Number of chunks created: ${chunks.length}`);
 
     // Create a new vector store instance
     vectorStore = new MemoryVectorStore(embeddings);
-    
     if (chunks.length > 0) {
       // Process each chunk to determine its page numbers
       const chunksWithPages = chunks.map((chunk, index) => {
@@ -484,25 +404,14 @@ app.post('/api/chat', validateChatInput, async (req, res, next) => {
           type: 'edit',
           operation: {
             type: operationType,
-            requirements: changedRequirements
+            requirements: changedRequirements,
+            fullRequirements: formatRequirementsForDisplay(modifiedRequirements)
           }
         });
       } else {
         // Handle general RFI questions using RAG with chunked context
         const relevantDocs = await vectorStore.similaritySearch(message, 5);
         
-        // Log detailed information about retrieved chunks
-        console.log('\n=== Retrieved Document Chunks ===');
-        console.log(`Number of chunks retrieved: ${relevantDocs.length}`);
-        relevantDocs.forEach((doc, index) => {
-          console.log(`\nChunk ${index + 1}:`);
-          console.log('Metadata:', doc.metadata);
-          console.log('Content:', doc.pageContent);
-          console.log('Content length:', doc.pageContent.length, 'characters');
-          console.log('Pages:', doc.metadata.pages);
-          console.log('---');
-        });
-
         const context = relevantDocs
           .map(doc => `[Pages ${doc.metadata.pages.join(', ')}]\n${doc.pageContent}`)
           .join('\n\n');
@@ -512,7 +421,7 @@ app.post('/api/chat', validateChatInput, async (req, res, next) => {
             Your entire response must be derived *solely* from this context.
             Do not use any external knowledge, infer information not explicitly stated, or make assumptions beyond what is written in the context.
             
-            If the answer to the user's question cannot be found within the "Context from RFI", you MUST respond with the exact phrase: "The answer to your question is not found in the provided document excerpts." Do not try to guess or provide related information if it's not in the context.
+            If the answer to your question cannot be found within the "Context from RFI", you MUST respond with the exact phrase: "The answer to your question is not found in the provided document excerpts." Do not try to guess or provide related information if it's not in the context.
             
             Context from RFI:
             ---
@@ -535,44 +444,15 @@ app.post('/api/chat', validateChatInput, async (req, res, next) => {
         });
       }
     } catch (error) {
-      if (error.response && error.response.status === 429) {
-        const retryAfter = error.response.headers['retry-after'] || 10;
-        return res.status(429).json({
-          error: 'Rate limit exceeded',
-          message: 'The AI service is currently busy. Please try again in a few seconds.',
-          retryAfter: parseInt(retryAfter)
-        });
-      }
-      throw error; // Re-throw other errors to be caught by the outer try-catch
+      next(error);
     }
   } catch (error) {
-    console.error('Error processing chat:', error);
-    // Handle different types of errors
-    if (error.response) {
-      res.status(error.response.status).json({
-        error: 'AI Service Error',
-        message: error.response.data.message || 'An error occurred while processing your request.'
-      });
-    } else if (error.request) {
-      // The request was made but no response was received
-      res.status(503).json({
-        error: 'Service Unavailable',
-        message: 'Unable to reach the AI service. Please try again later.'
-      });
-    } else {
-      res.status(500).json({
-        error: 'Internal Server Error',
-        message: 'An unexpected error occurred. Please try again later.'
-      });
-    }
+    next(error);
   }
-});
+}); // End of /api/chat endpoint
 
-// Get current requirements
-app.get('/api/requirements', (req, res) => {
-  res.json({ 
-    requirements: formatRequirementsForDisplay(currentRequirements)
-  });
+app.listen(process.env.PORT || 3000, () => {
+  console.log(`Server is running on port ${process.env.PORT || 3000}`);
 });
 
 
@@ -603,7 +483,7 @@ app.post('/api/baseline', (req, res) => {
     res.status(500).json({ error: 'Failed to save baseline questions' });
   }
 });
-=======
+
 // Error handling middleware
 app.use((err, req, res, next) => {
   console.error(err.stack);
