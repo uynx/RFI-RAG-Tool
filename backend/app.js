@@ -7,7 +7,6 @@ const fs = require('fs');
 const pdfParse = require('pdf-parse');
 const path = require('path');
 const BASELINE_PATH = path.join(__dirname, 'baseline.json');
-=======
 const { PDFLoader } = require("langchain/document_loaders/fs/pdf");
 const { RecursiveCharacterTextSplitter } = require('langchain/text_splitter');
 const { ChatMistralAI } = require('@langchain/mistralai');
@@ -603,7 +602,6 @@ app.post('/api/baseline', (req, res) => {
     res.status(500).json({ error: 'Failed to save baseline questions' });
   }
 });
-=======
 // Error handling middleware
 app.use((err, req, res, next) => {
   console.error(err.stack);
