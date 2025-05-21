@@ -191,11 +191,15 @@ export default function Chat() {
   const [input, setInput] = useState('');
   const [messages, setMessages] = useState([]);
   const [isUploading, setIsUploading] = useState(false);
-  const [stage, setStage] = useState('upload'); // 'upload' or 'chat'
   const fileInputRef = useRef(null);
   const chatContainerRef = useRef(null);
+
+  const [isRetrying, setIsRetrying] = useState(false);
+  const [retryAfter, setRetryAfter] = useState(null);
+
   const [showBaselineModal, setShowBaselineModal] = useState(false);
   const [baselineQuestions, setBaselineQuestions] = useState('');
+
 
   // Scroll to bottom on new message
   useEffect(() => {
@@ -229,11 +233,14 @@ export default function Chat() {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
 
+
+
       setStage('chat');
+
       setMessages([
         {
           role: 'assistant',
-          content: `I've analyzed your RFI document. Here is the outline for what a good submission should contain:\n\n${response.data.summary}\n\nYou can now ask me any questions about the document.`
+          content: `I've analyzed your RFI document and extracted the following requirements:\n\n${response.data.summary}\n\nYou can now ask questions about the requirements or edit them by providing instructions.`
         }
       ]);
     } catch (error) {
@@ -252,25 +259,82 @@ export default function Chat() {
     if (!input.trim()) return;
 
     const userMessage = { role: 'user', content: input };
-    setMessages((prev) => [...prev, userMessage]);
+    setMessages(prev => [...prev, userMessage]);
+    setInput('');
 
     try {
       const response = await axios.post('http://localhost:3000/api/chat', {
         message: input,
       });
 
-      const aiMessage = { role: 'assistant', content: response.data.response };
-      setMessages((prev) => [...prev, aiMessage]);
+      const aiMessage = { 
+        role: 'assistant', 
+        content: response.data.type === 'edit' 
+          ? `Requirements updated:\n\n${response.data.operation.type}\n\n${response.data.operation.requirements.map(req => `- **${req.heading}**: ${req.description}`).join('\n')}`
+          : response.data.response 
+      };
+      setMessages(prev => [...prev, aiMessage]);
+      setRetryAfter(null);
     } catch (error) {
       console.error('Error sending message:', error);
-      setMessages((prev) => [
-        ...prev,
-        { role: 'assistant', content: 'Error: Failed to get response' },
-      ]);
+      
+      if (error.response) {
+        if (error.response.status === 429) {
+          // Rate limit exceeded
+          const retryTime = error.response.data.retryAfter || 10;
+          setRetryAfter(retryTime);
+          setMessages(prev => [
+            ...prev,
+            { 
+              role: 'assistant', 
+              content: `The AI service is currently busy. Please try again in ${retryTime} seconds.` 
+            },
+          ]);
+          
+          // Start countdown
+          setIsRetrying(true);
+          const timer = setInterval(() => {
+            setRetryAfter(prev => {
+              if (prev <= 1) {
+                clearInterval(timer);
+                setIsRetrying(false);
+                return null;
+              }
+              return prev - 1;
+            });
+          }, 1000);
+        } else {
+          // Other API errors
+          setMessages(prev => [
+            ...prev,
+            { 
+              role: 'assistant', 
+              content: error.response.data.message || 'An error occurred while processing your request.' 
+            },
+          ]);
+        }
+      } else {
+        // Network or other errors
+        setMessages(prev => [
+          ...prev,
+          { 
+            role: 'assistant', 
+            content: 'Unable to reach the server. Please check your connection and try again.' 
+          },
+        ]);
+      }
     }
-
-    setInput('');
   };
+
+
+  return (
+    <div className="chat-stage">
+      <div id="title">RFI Assistant</div>
+      {messages.length === 0 ? (
+        <div className="upload-stage">
+          <div className="upload-content">
+            <h2>Upload RFI Document</h2>
+            <p>Upload a PDF file to analyze the RFI requirements.</p>
 
   // Show Upload Page
   if (stage === 'upload') {
@@ -283,22 +347,52 @@ export default function Chat() {
           <div className="upload-area">
             <input
               type="file"
-              id="file-upload"
               accept=".pdf"
               onChange={handleFileUpload}
               ref={fileInputRef}
               style={{ display: 'none' }}
+              id="file-upload"
             />
             <label htmlFor="file-upload" className="upload-button">
               {isUploading ? 'Uploading...' : 'Upload PDF'}
             </label>
           </div>
         </div>
+      ) : (
+        <>
+          <div id="chat-container" ref={chatContainerRef}>
+            {messages.map((msg, index) => (
+              <div
+                key={index}
+                className={`message ${msg.role === 'user' ? 'user' : 'assistant'}`}
+              >
+                <ReactMarkdown>{msg.content}</ReactMarkdown>
+              </div>
+            ))}
+          </div>
+          <form id="chatbar" onSubmit={handleSubmit}>
+            <input
+              type="text"
+              name="bar"
+              id="bar"
+              value={input}
+              onChange={handleInputChange}
+              placeholder={isRetrying ? `Please wait ${retryAfter} seconds...` : "Ask a question or provide instructions to edit requirements..."}
+              disabled={isRetrying}
+            />
+            <button 
+              type="submit" 
+              id="enter"
+              disabled={isRetrying}
+            >
+            </button>
+          </form>
+        </>
+
       </div>
     );
   }
 
-  // Chat Interface
   return (
     <div className="chat-stage">
       <div id="title">RFI Assistant</div>
@@ -352,6 +446,7 @@ export default function Chat() {
             />
           </div>
         </div>
+
       )}
     </div>
   );

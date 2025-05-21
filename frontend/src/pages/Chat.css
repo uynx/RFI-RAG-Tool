@@ -399,6 +399,149 @@
   display: none;
 }
 
+.edit-stage {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background-color: #f8f9fa;
+}
+
+.requirements-container {
+  margin: 80px auto 20px;
+  padding: 24px;
+  max-width: 800px;
+  width: 90%;
+  background-color: white;
+  border-radius: 16px;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
+}
+
+.requirements-container h2 {
+  color: #1a1a1a;
+  font-size: 24px;
+  margin-bottom: 20px;
+  font-weight: 600;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+.requirements-list {
+  margin-bottom: 24px;
+}
+
+.requirement-item {
+  padding: 16px;
+  margin-bottom: 12px;
+  background-color: #f8f9fa;
+  border-radius: 12px;
+  border: 1px solid #e9ecef;
+}
+
+.requirement-item h3 {
+  color: #2c3e50;
+  font-size: 18px;
+  margin-bottom: 8px;
+  font-weight: 600;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+.requirement-item p {
+  color: #4a5568;
+  font-size: 15px;
+  line-height: 1.5;
+  margin: 0;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+.operation-summary {
+  margin-top: 24px;
+  padding: 16px;
+  border-radius: 12px;
+  border: 1px solid #e9ecef;
+}
+
+.operation-summary.addedrequirements {
+  background-color: #e6f4ea;
+  border-color: #34a853;
+}
+
+.operation-summary.removedrequirements {
+  background-color: #fce8e6;
+  border-color: #ea4335;
+}
+
+.operation-summary.editedrequirements {
+  background-color: #e8f0fe;
+  border-color: #1a73e8;
+}
+
+.operation-summary h3 {
+  color: #1a1a1a;
+  font-size: 18px;
+  margin-bottom: 12px;
+  font-weight: 600;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+.proceed-button {
+  display: block;
+  width: 100%;
+  padding: 14px;
+  margin-top: 24px;
+  background-color: #007AFF;
+  color: white;
+  border: none;
+  border-radius: 12px;
+  font-size: 16px;
+  font-weight: 500;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.proceed-button:hover {
+  background-color: #0066cc;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0, 122, 255, 0.4);
+}
+
+.proceed-button:active {
+  transform: translateY(1px);
+  box-shadow: 0 1px 4px rgba(0, 122, 255, 0.3);
+}
+
+/* Responsive adjustments for edit stage */
+@media (max-width: 768px) {
+  .requirements-container {
+    margin-top: 100px;
+    padding: 20px;
+  }
+
+  .requirement-item {
+    padding: 12px;
+  }
+
+  .requirement-item h3 {
+    font-size: 16px;
+  }
+
+  .requirement-item p {
+    font-size: 14px;
+  }
+
+  .operation-summary {
+    padding: 12px;
+  }
+
+  .operation-summary h3 {
+    font-size: 16px;
+  }
+
+  .proceed-button {
+    padding: 12px;
+    font-size: 15px;
+  }
+}
+=======
 
 
 
