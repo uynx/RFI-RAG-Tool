@@ -451,11 +451,6 @@ app.post('/api/chat', validateChatInput, async (req, res, next) => {
   }
 }); // End of /api/chat endpoint
 
-app.listen(process.env.PORT || 3000, () => {
-  console.log(`Server is running on port ${process.env.PORT || 3000}`);
-});
-
-
 // Get baseline questions
 app.get('/api/baseline', (req, res) => {
   try {
@@ -494,5 +489,5 @@ app.use((err, req, res, next) => {
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`Running!`);
+  console.log(`Server is running on port ${PORT}`);
 });
