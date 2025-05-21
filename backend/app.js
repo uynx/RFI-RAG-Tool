@@ -4,7 +4,8 @@ const dotenv = require('dotenv');
 const cors = require('cors');
 const multer = require('multer');
 const fs = require('fs');
-const pdfParse = require('pdf-parse');
+const { PDFLoader } = require("langchain/document_loaders/fs/pdf");
+const { RecursiveCharacterTextSplitter } = require('langchain/text_splitter');
 const { ChatMistralAI } = require('@langchain/mistralai');
 const { PromptTemplate } = require('@langchain/core/prompts');
 const { RunnableSequence } = require('@langchain/core/runnables');
@@ -17,7 +18,6 @@ const { body, validationResult } = require('express-validator');
 const { SystemMessage, HumanMessage } = require('@langchain/core/messages');
 const axios = require('axios');
 const axiosRetry = require('axios-retry').default;
-const { RecursiveCharacterTextSplitter } = require('langchain/text_splitter');
 
 dotenv.config();
 
@@ -82,6 +82,54 @@ const validateChatInput = [
 let currentRequirements = new Map();
 let currentPDFText = '';
 
+// Define the RFI cleaning system prompt
+const RFI_CLEANING_SYSTEM_PROMPT = `Expert RFI Processor: Your goal is to distill RFI text by **selectively REMOVING** non-essential information, optimizing it for a **vector database**. Essential text for submission **MUST BE RETAINED VERBATIM**. No rephrasing, summarization, or alteration of this essential text is allowed; accuracy and relevance are paramount for semantic search.
+
+Core Principles:
+*   **Verbatim Retention (Vector DB):** Crucial RFI text (requirements, direct context, solicited info) **MUST BE PRESERVED EXACTLY** as in the original, with no wording changes. This ensures accurate core content embedding.
+*   **Remove Non-Essentials (Vector DB Clarity):** Identify and completely remove text not part of core RFI requests or their immediate, necessary context. This reduces noise and improves vector search relevance.
+
+General Cleaning & Structuring (applied to VERBATIM retained text):
+1.  Remove headers, footers, page numbers.
+2.  Reassemble broken paragraphs/sentences to original flow (words unchanged).
+3.  Eliminate redundant whitespace/line breaks.
+4.  Remove OCR artifacts/noise.
+5.  Preserve original bold/italic formatting *only* for key terms in retained essential requirements/context.
+6.  Convert tables with requirements/essential data to clean text; content/wording **must be verbatim**. Remove procedural tables.
+7.  **No Corrections:** Do not correct original spelling/grammar/typos in retained text. Preserve source integrity for vector DB.
+
+Content Distillation (RETAIN VERBATIM vs. REMOVE):
+
+8.  **RETAIN VERBATIM (for accurate embedding):**
+    a.  **Core RFI Requests:** Explicit questions, "Information Solicited" sections, lists of desired capabilities, features, or info to be provided. Keep exactly as written.
+    b.  **Essential Background/Context:** Summaries, problem statements, background *directly and unequivocally necessary* to understand RFI scope, objectives, needs. Retain verbatim. Remove general, administrative, or implied context to avoid diluting semantic meaning in vector DB.
+    c.  **Technical Specifications & Criteria:** Technical details, performance metrics, evaluation criteria (if for judging responses), specific standards. Retain verbatim.
+    d.  **Response Structure Guidelines:** Instructions on *content* organization (e.g., "Your proposal should include..."). Retain verbatim.
+
+9.  **REMOVE COMPLETELY (to reduce vector DB noise):**
+    a.  **Procedural & Logistical Info:**
+        i.  Contact details for RFI process/submission system support.
+        ii. Submission mechanics (how/where to submit, e.g., portal names, addresses, file format rules not tied to content).
+        iii. General informational URLs/hyperlinks. *Retain URL verbatim ONLY if part of a direct instruction (e.g., "Analyze framework at [URL]"). Remove all others.*
+        iv. RFI Document Metadata: Internal doc numbers, RFI publication dates (unless in retained requirements schedule), docket/FR citation/FR Doc numbers, BILLING CODES.
+        v.  Purely administrative dates (e.g., "Comments due March 20"). *Retain dates verbatim if part of a project milestone/deliverable schedule the RFI asks about.*
+    b.  **Non-Essential & Boilerplate Content:**
+        i.  Legal disclaimers/boilerplate about the RFI document itself (e.g., "prototype site," "not official legal edition," "LEGAL STATUS").
+        ii. Acknowledgements, author/editor lists, forewords.
+        iii. **Remove All Footnotes/Endnotes:** Entirely remove footnotes, endnotes, and their markers. Do not integrate their content.
+        iv. General intros, preambles, conclusions not contributing to understanding solicited information (per Rule 8).
+        v.  Attendee lists, RFI revision histories, similar administrative overhead.
+        vi. Tables of Contents.
+
+10. **Output Formatting:**
+    a.  Output only the distilled text (verbatim retained sections, non-essentials removed).
+    b.  Use double newlines for clear section breaks.
+    c.  Preserve original list structures for requirements/solicited info.
+
+11. **Guiding Principle for Removal (Optimizing for Vector Database):** The output must be a streamlined RFI for vector database ingestion, where semantic relevance is key. It must consist *only* of the verbatim essential text. Completely remove all other administrative, procedural, or informational details not critical for response formulation or understanding core requirements to prevent noisy/irrelevant vectors. If in doubt about removal, lean towards removing text if it doesn't state what respondent must *provide* or its *direct, necessary context*, as this improves vector DB retrieval quality.
+
+Do not add any commentary or explanations. Only output the cleaned text.`;
+
 // Helper functions
 function formatRequirementsForDisplay(requirementsMap) {
   // console.log('Current requirements in display format:', 
@@ -144,37 +192,22 @@ app.post('/api/upload', upload.single('file'), async (req, res, next) => {
     }
 
     const pdfPath = req.file.path;
-    const dataBuffer = fs.readFileSync(pdfPath);
-    const pdfData = await pdfParse(dataBuffer);
-    const text = pdfData.text;
-    currentPDFText = text;
-
-    // Create text splitter for chunking
-    const textSplitter = new RecursiveCharacterTextSplitter({
-      chunkSize: 1000, // Size of each chunk in characters
-      chunkOverlap: 200, // Overlap between chunks
-      separators: ["\n\n", "\n", ".", "!", "?", ",", " ", ""], // Split on these characters in order
-    });
-
-    // Split the document into chunks
-    const chunks = await textSplitter.createDocuments([text]);
-
-    // Create a new vector store instance for the new document
-    vectorStore = new MemoryVectorStore(embeddings);
     
-    // Add chunks to vector store with metadata
-    await vectorStore.addDocuments(chunks.map((chunk, index) => ({
-      pageContent: chunk.pageContent,
-      metadata: { 
-        source: 'uploaded_rfi',
-        chunk: index + 1,
-        totalChunks: chunks.length
-      }
-    })));
+    const loader = new PDFLoader(pdfPath);
+    const docs = await loader.load();
+    
+    // Process each page to maintain page numbers
+    const pageContents = docs.map((doc, index) => ({
+      content: doc.pageContent,
+      pageNumber: doc.metadata?.loc?.pageNumber || (index + 1)
+    }));
 
-    // Extract requirements using the existing prompt
-    const chatResponse = await client.chat.complete({
-      model: 'mistral-small-latest', // Or your preferred model
+    const rawFullText = pageContents.map(page => page.content).join('\n\n');
+    currentPDFText = rawFullText;
+
+    // ---- STAGE 1: Extract initial requirements from raw text ----
+    const initialRequirementsChatResponse = await client.chat.complete({
+      model: 'mistral-small-latest',
       temperature: 0.1,
       messages: [
         {
@@ -201,15 +234,14 @@ No intro/summary.
         },
         {
           role: 'user',
-          content: text // This 'text' variable will contain the full RFI document
+          content: rawFullText
         }
       ]
     });
-    const summary = chatResponse.choices[0].message.content;
+    const summaryForUI = initialRequirementsChatResponse.choices[0].message.content;
 
-    // Extract and store requirements
     const newRequirements = new Map();
-    summary
+    summaryForUI
       .split('\n')
       .filter(line => line.trim().startsWith('-'))
       .forEach(line => {
@@ -219,20 +251,104 @@ No intro/summary.
         const description = descParts.join(':').trim();
         newRequirements.set(cleanHeading, description);
       });
-
     currentRequirements = newRequirements;
 
-    // Clean up
+    // ---- STAGE 2: Comment out cleaning stage ----
+    /*
+    console.log('\nAttempting to clean RFI text for vector database...');
+    const cleaningResponse = await client.chat.complete({
+      model: 'mistral-small-latest',
+      temperature: 0.0,
+      messages: [
+        {
+          role: 'system',
+          content: RFI_CLEANING_SYSTEM_PROMPT
+        },
+        {
+          role: 'user',
+          content: rawFullText
+        }
+      ]
+    });
+    const cleanedTextForVectorDB = cleaningResponse.choices[0].message.content;
+    */
+
+    // ---- STAGE 3: Chunk the raw text and add to vector store ----
+    console.log('\nChunking raw text for vector database...');
+    
+    const textSplitter = new RecursiveCharacterTextSplitter({
+      separators: [
+        "\n\n", ". ", "\n", // Prioritize semantic breaks
+        "! ", "? ", "; ", ": ", ", ", 
+        " ", ""
+      ],
+      chunkSize: 1500,
+      chunkOverlap: 300,
+      lengthFunction: (text) => text.length,
+      isSeparatorRegex: false
+    });
+
+    // Create a mapping of text positions to page numbers
+    const pageMapping = new Map();
+    let currentPosition = 0;
+    pageContents.forEach(page => {
+      const pageLength = page.content.length;
+      // Map each character position in the text to its page number
+      for (let i = 0; i < pageLength; i++) {
+        pageMapping.set(currentPosition + i, page.pageNumber);
+      }
+      currentPosition += pageLength + 2; // +2 for the '\n\n' separator
+    });
+
+    // Split the raw text into chunks
+    const chunks = await textSplitter.createDocuments([rawFullText]);
+    console.log(`Number of chunks created: ${chunks.length}`);
+
+    // Create a new vector store instance
+    vectorStore = new MemoryVectorStore(embeddings);
+    
+    if (chunks.length > 0) {
+      // Process each chunk to determine its page numbers
+      const chunksWithPages = chunks.map((chunk, index) => {
+        // Find the position of this chunk in the original text
+        const chunkStart = rawFullText.indexOf(chunk.pageContent);
+        const chunkEnd = chunkStart + chunk.pageContent.length;
+        
+        // Get all page numbers this chunk spans
+        const pages = new Set();
+        for (let i = chunkStart; i <= chunkEnd; i++) {
+          const page = pageMapping.get(i);
+          if (page) pages.add(page);
+        }
+        
+        return {
+          pageContent: chunk.pageContent,
+          metadata: {
+            source: 'raw_rfi',
+            chunk: index + 1,
+            totalChunks: chunks.length,
+            pages: Array.from(pages).sort((a, b) => a - b), // Sorted array of page numbers
+            pdfPath: pdfPath
+          }
+        };
+      });
+
+      await vectorStore.addDocuments(chunksWithPages);
+      console.log(`${chunks.length} chunks added to vector store with page information.`);
+    } else {
+      console.log("No chunks were created. Vector store will be empty.");
+    }
+
     fs.unlinkSync(pdfPath);
 
     res.json({ 
-      summary, 
+      summary: summaryForUI, 
       requirements: formatRequirementsForDisplay(currentRequirements),
-      chunks: chunks.length // Add chunk count to response
+      chunks: chunks.length
     });
     
   } catch (error) {
-    if (req.file) {
+    if (req.file && fs.existsSync(req.file.path)) {
       fs.unlinkSync(req.file.path);
     }
     next(error);
@@ -250,7 +366,6 @@ app.post('/api/chat', validateChatInput, async (req, res, next) => {
     const { message } = req.body;
     
     try {
-      // Determine query type
       const queryType = await queryRouter.invoke({ query: message });
       
       if (queryType.trim() === 'EDIT') {
@@ -371,25 +486,49 @@ app.post('/api/chat', validateChatInput, async (req, res, next) => {
         });
       } else {
         // Handle general RFI questions using RAG with chunked context
-        const relevantDocs = await vectorStore.similaritySearch(message, 5); // Increased from 3 to 5 for better context
+        const relevantDocs = await vectorStore.similaritySearch(message, 5);
+        
+        // Log detailed information about retrieved chunks
+        console.log('\n=== Retrieved Document Chunks ===');
+        console.log(`Number of chunks retrieved: ${relevantDocs.length}`);
+        relevantDocs.forEach((doc, index) => {
+          console.log(`\nChunk ${index + 1}:`);
+          console.log('Metadata:', doc.metadata);
+          console.log('Content:', doc.pageContent);
+          console.log('Content length:', doc.pageContent.length, 'characters');
+          console.log('Pages:', doc.metadata.pages);
+          console.log('---');
+        });
+
         const context = relevantDocs
-          .map(doc => `[Chunk ${doc.metadata.chunk}/${doc.metadata.totalChunks}]\n${doc.pageContent}`)
+          .map(doc => `[Pages ${doc.metadata.pages.join(', ')}]\n${doc.pageContent}`)
           .join('\n\n');
 
-          const questionResponse = await chatModel.invoke([
-            new SystemMessage(`Answer user's RFI question using provided context. If answer not in context, state so.
-  Context (chunked):
-  ${context}
-  
-  Requirements (reference):
-  ${formatRequirementsForLLM(currentRequirements)}
-  Chunks marked [Chunk X/Y].`),
-            new HumanMessage(message)
-          ]);
+        const questionResponse = await chatModel.invoke([
+          new SystemMessage(`You are an AI assistant tasked with answering questions *exclusively* from the provided "Context from RFI".
+            Your entire response must be derived *solely* from this context.
+            Do not use any external knowledge, infer information not explicitly stated, or make assumptions beyond what is written in the context.
+            
+            If the answer to the user's question cannot be found within the "Context from RFI", you MUST respond with the exact phrase: "The answer to your question is not found in the provided document excerpts." Do not try to guess or provide related information if it's not in the context.
+            
+            Context from RFI:
+            ---
+            ${context}
+            ---
+          `),
+          new HumanMessage(message)
+        ]);
+
+        // Include page information in the response
+        const sourcePages = relevantDocs.map(doc => ({
+          pages: doc.metadata.pages,
+          pdfPath: doc.metadata.pdfPath
+        }));
 
         res.json({
           type: 'question',
-          response: questionResponse.content
+          response: questionResponse.content,
+          sources: sourcePages // Include page information for frontend reference
         });
       }
     } catch (error) {
